@@ -1,93 +1,113 @@
-# CivicSense
+# CivicSense Bhutan
 
+Streamlit and SQLite prototype for citizen complaint reporting and municipal triage in Thimphu. Citizens can register,
+submit complaints with optional photos, track their own complaint tokens and status, and update their accounts.
+Administrators use a separately authenticated dashboard to review and manage all complaints.
 
+## Run
 
-## Getting started
-
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
-
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
-
-```
-cd existing_repo
-git remote add origin https://gitlab.com/civicsense/civicsense.git
-git branch -M main
-git push -uf origin main
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+streamlit run app.py
 ```
 
-## Integrate with your tools
+The app uses `civicsense.db` and `uploads/` beside `app.py` by default. It creates and seeds an empty database with
+the prototype's historical sample complaints. Existing complaint rows are retained; startup performs additive
+SQLite migrations for account ownership and analysis/audit metadata. There is no reset control in the app.
 
-* [Set up project integrations](https://gitlab.com/civicsense/civicsense/-/settings/integrations)
+## Accounts and access
 
-## Collaborate with your team
+- Citizens create accounts in the app. Passwords are stored as salted PBKDF2-HMAC-SHA256 hashes. Citizens can read
+  only complaints owned by their account and can update their profile and password from **Account** in the sidebar.
+  After successful signup, the app returns to the citizen sign-in screen.
+- Administrators have a separate sign-in and signup screen. A signed-in administrator can open **Add admin** in
+  the vertical sidebar, enter the new administrator's username, and generate a username-bound one-time invite.
+  The code is valid for 24 hours, stored only as a hash, and can be redeemed once; a new invite from that
+  administrator invalidates their previous unused invite. Share both the assigned username and code privately.
+  Successful signup returns to the administrator sign-in screen. Administrator passwords must contain at least
+  16 characters and are stored as salted
+  PBKDF2-HMAC-SHA256 hashes. For first-time setup, an operator can still configure an invite code and/or operator
+  credentials on the server:
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+  ```powershell
+  $env:CIVICSENSE_ADMIN_USERNAME = "municipal-admin"
+  $env:CIVICSENSE_ADMIN_PASSWORD = "<use-a-long-unique-secret>"
+  $env:CIVICSENSE_ADMIN_SIGNUP_CODE = "<optional-bootstrap-code-of-at-least-32-characters>"
+  streamlit run app.py
+  ```
 
-## Test and Deploy
+  Use a deployment secret manager rather than committing credentials or putting them in source control. The
+  operator-managed admin password is compared server-side and is not stored in the SQLite account table. The
+  dashboard-generated invite is stored as a hash in SQLite and does not require environment configuration.
+- Both roles have an **Account** page in the sidebar. Citizens can edit their username, name, phone, and password.
+  Administrators can edit their username, display name, and contact phone, and change the password for an app-registered
+  administrator account. Changing a username preserves owned complaints and administrator attribution. Server-provisioned
+  administrator credentials must be changed by the service operator.
+- Citizen and administrator profiles can each choose a saved **System**, **Light**, or **Dark** appearance. System follows
+  the device or browser color-scheme preference.
+- Sidebar navigation uses labeled buttons in a compact 17rem expanded width, without separate sidebar labels or status text.
+  The app toolbar is minimized.
+- Existing complaints have no citizen account owner and are visible only to administrators.
 
-Use the built-in continuous integration in GitLab.
+## Triage and AI configuration
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+The offline engine is a transparent weighted-keyword classifier with conservative rule-based urgency. Critical and
+high-risk terms take precedence; unfamiliar complaints default to Medium rather than Low. Low is used only for
+known complaint categories with explicit low-impact wording. `Category Score` is a weighted local keyword-match score,
+not a percentage or a calibrated model confidence.
+Complaint receipts and saved complaint details show the weighted score and matched terms for each category, so staff
+can see how the local classifier selected its result.
 
-***
+An optional hosted model can return structured category/urgency analysis and explanations. Configure exactly one
+provider on the server:
 
-# Editing this README
+```powershell
+$env:CIVICSENSE_AI_PROVIDER = "OpenAI"  # or Anthropic or Groq
+$env:OPENAI_API_KEY = "<server-side-secret>"
+```
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+Use `ANTHROPIC_API_KEY` or `GROQ_API_KEY` for those providers. The report description is sent for triage only when the
+citizen opts in on the submit page. The API key stays server-side. Invalid model responses, API errors, and timeouts
+fall back to local triage without blocking submission. A model-reported confidence is displayed only when the response
+contains a valid 0-1 value; it is explicitly not independently calibrated. The app does not include or download a
+trained model, so a hosted provider and API key are required for model-based analysis.
 
-## Suggestions for a good README
+## Location and photos
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+The app recognizes nine configured Thimphu landmarks in complaint text and can extract a likely place phrase after
+common location cues. Citizens can enter a freeform place name without blocking submission. With explicit consent,
+the app can search either the typed location or the extracted phrase using OpenStreetMap Nominatim; only that place
+string is sent, not the full complaint or contact details. Searches are rate-limited to one per second, cached in
+process memory, and restricted to the supported Thimphu map area. Results require the citizen to select the intended
+place; the system does not guess among multiple matches. If search fails, the entered/extracted name is still saved
+and the complaint has no guessed coordinates; it is omitted from the map and geographic duplicate matching.
 
-## Name
-Choose a self-explaining name for your project.
+Photos are stored under `uploads/`. The upload field clears after a complaint is successfully committed to SQLite;
+on a submission error, the selected photo remains available for retry. An administrator can explicitly authorize an
+AI photo review for a selected complaint; that action sends the photo and complaint description to the configured
+vision-capable provider and saves the generated review for both the citizen and administrators to see. AI reviews
+describe visible evidence and limitations and should not be treated as definitive safety assessments. AI photo review
+requires a configured provider and API key.
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+## Administration and limitations
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+Administrators can search and filter all complaints, inspect descriptions and photos, update status and reviewed
+urgency, view original triage urgency, and export CSV/Excel. Administrators can request AI service insights based on
+aggregate complaint counts, categories, priorities, locations, and statuses; only these summary aggregates are sent to
+the configured provider, not citizen names, contact details, or free-text complaint descriptions. Citizens can remove
+their own complaints and administrators can remove any complaint, one at a time from the complaint list. Selecting
+Remove opens a confirmation prompt; the complaint is deleted only after confirmation. Removal also deletes the stored
+photo when it is inside `uploads/`. The admin map includes all complaints with known coordinates, including resolved
+reports, and automatically fits the map to all markers so locations such as Babesa are visible on load. Selecting a
+marker shows the original citizen report. Reports without coordinates are listed below the map and are not assigned
+guessed locations.
+The receipt's Print token button opens the browser print dialog and prints only the complaint token.
+The OpenStreetMap map tiles require internet access.
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+This remains a single-process Streamlit/SQLite proof of concept, not a production identity platform. It does not
+provide email/phone verification, centralized login throttling, multi-instance session management, or deployment
+hardening. Before production use, deploy behind HTTPS and a trusted identity/access layer, protect the SQLite file
+and uploaded photos, configure backups, and review the data-retention and AI-provider privacy requirements.
+Officer names and phone numbers in the seed data are illustrative.
